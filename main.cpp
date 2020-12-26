@@ -1,3 +1,6 @@
+#include "giomm/application.h"
+#include "glibmm/miscutils.h"
+#include <cstdlib>
 #include <gtkmm.h>
 #include <iostream>
 #include <memory>
@@ -27,7 +30,7 @@ private:
 
 MyWindow::MyWindow() : m_pTextView()
 {
-  set_title("Hello, World!");
+  set_title("Bow — text editor");
   set_default_size(400, 400);
 
   m_pTextView.set_size_request(300, 300);
@@ -40,8 +43,12 @@ MyWindow::MyWindow() : m_pTextView()
 
 MyWindow::~MyWindow() {}
 
+// buffer api call
 void MyWindow::open(const std::string &filename) {
-  std::string content = Glib::file_get_contents(filename);
+  std::string fullpath = Glib::canonicalize_filename(filename, Glib::get_current_dir());
+
+  std::cout << "file_get_content(" << fullpath << ")" << std::endl;
+  std::string content = Glib::file_get_contents(fullpath);
 
   auto refBuffer = m_pTextView.get_buffer().get();
   refBuffer->set_text(content);
@@ -50,13 +57,17 @@ void MyWindow::open(const std::string &filename) {
   ts_parser_set_language(parser, tree_sitter_javascript());
 
   TSTree *tree = ts_parser_parse_string(parser, NULL, content.c_str(), content.length());
+
+  TSNode root_node = ts_tree_root_node(tree);
+  std::cout << ts_node_string(root_node) << std::endl;
 }
 
 int main(int argc, char* argv[]) {
   auto app = Gtk::Application::create("me.oddy.bow");
   MyWindow window;
 
-  window.open("/home/vst/Dev/gnome/bow/main.cpp");
-
+  // window.open("sample/react.development.js");
+  window.open("../sample/simple.js");
+  
   app->run(window, argc, argv);
 }
