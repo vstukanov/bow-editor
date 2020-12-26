@@ -6,7 +6,17 @@ function Person(){
   setInterval(() => {
     // `this` now refers to the Person object, brilliant!
     this.age++;
-  }, 1000);
+  }, 1000);``
+
+  return 200;
 }
+
+const foo = {
+  my_band: (ev) => {
+    console.log(ev, true);
+  },
+};
+
+foo.my_band();
 
 var p = new Person();
