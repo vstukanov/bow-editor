@@ -1,13 +1,17 @@
-#include "giomm/application.h"
-#include "glibmm/miscutils.h"
-#include "gtkmm/textiter.h"
-#include "pangomm/fontdescription.h"
+#include <cstddef>
+#include <fstream>
+#include <giomm/application.h>
+#include <glibmm/miscutils.h>
+#include <gtkmm/textiter.h>
+#include <iterator>
+#include <pangomm/fontdescription.h>
 #include <cstdlib>
 #include <gtkmm.h>
 #include <iostream>
 #include <memory>
 #include <set>
 #include <string>
+#include <libguile.h>
 
 #include <tree_sitter/api.h>
 
@@ -15,6 +19,8 @@
 #include <glibmm/refptr.h>
 #include <gtkmm/scrolledwindow.h>
 #include <gtkmm/textview.h>
+
+const std::string BASE = "/home/vst/Dev/snaex/bow-editor/";
 
 // implemented by `tree-sitter-javascript` library.
 extern "C" TSLanguage *tree_sitter_javascript();
@@ -74,7 +80,7 @@ void MyWindow::create_theme() {
   auto commentTag = create_theme_tag("comment", "#8c8c8c");
   commentTag->property_style() = Pango::STYLE_ITALIC;
   rTagTable->add(commentTag);
-  
+
   rTagTable->add(create_theme_tag("keyword", "#0033b3"));
   rTagTable->add(create_theme_tag("variable.builtin", "#0033b3"));
   rTagTable->add(create_theme_tag("function.builtin", "#0033b3"));
@@ -109,7 +115,19 @@ void MyWindow::open(const std::string &filename) {
   std::string fullpath = Glib::canonicalize_filename(filename, Glib::get_current_dir());
 
   std::cout << "file_get_content(" << fullpath << ")" << std::endl;
-  std::string content = Glib::file_get_contents(fullpath);
+
+  if (!Glib::file_test(fullpath, Glib::FILE_TEST_EXISTS)) {
+    std::cerr << "File " << fullpath << "doesn't exits." << std::endl;
+    return;
+  }
+
+  std::string content;
+
+  try {
+    content = Glib::file_get_contents(fullpath);
+  } catch (Glib::FileError fileError) {
+    std::cerr << fileError.what() << std::endl;
+  }
 
   auto refBuffer = m_pTextView.get_buffer();
   refBuffer->set_text(content);
@@ -122,7 +140,7 @@ void MyWindow::open(const std::string &filename) {
   TSNode root_node = ts_tree_root_node(tree);
   TSTreeCursor cursor = ts_tree_cursor_new(root_node);
 
-  std::string queris = Glib::file_get_contents("/home/vst/Dev/gnome/bow/libs/tree-sitter-javascript/queries/highlights.scm");
+  std::string queris = Glib::file_get_contents(BASE + "libs/tree-sitter-javascript/queries/highlights.scm");
   uint err_offset = 0;
   TSQueryError query_error;
   TSQuery* query = ts_query_new(tree_sitter_javascript(),
@@ -156,8 +174,6 @@ void MyWindow::open(const std::string &filename) {
       auto is = refBuffer->get_iter_at_line_offset(node_start.row, node_start.column);
       auto ie = refBuffer->get_iter_at_line_offset(node_end.row, node_end.column);
 
-      
-
       if (std::find(m_supported_tags.cbegin(), m_supported_tags.cend(), capture_name) != m_supported_tags.cend()) {
 	refBuffer->apply_tag_by_name(capture_name, is, ie);
       } else {
@@ -170,13 +186,36 @@ void MyWindow::open(const std::string &filename) {
   }
 }
 
-int main(int argc, char* argv[]) {
-  auto app = Gtk::Application::create("me.oddy.bow");
-  MyWindow window;
+MyWindow *window = nullptr;
 
-  // window.open("sample/react.development.js");
-  window.open("/home/vst/Dev/gnome/bow/sample/simple.js");
-  window.set_font("DejaVu Sans Mono", 10);
+extern "C" {
+  static SCM api_find_file(SCM scm_path) {
+    size_t path_length;
+    char *cpath = scm_to_utf8_stringn(scm_path, &path_length);
+
+    window->open(std::string(cpath, path_length));
+
+    return SCM_UNSPECIFIED;
+  }
   
-  app->run(window, argc, argv);
+  static void scm_main(void *closure, int argc, char *argv[]) {
+    std::cout << "Hello, World!" << std::endl;
+
+    auto app = Gtk::Application::create("me.oddy.bow");
+    window = new MyWindow();
+
+    // window.open("sample/react.development.js");
+    window->set_font("DejaVu Sans Mono", 10);
+
+    scm_c_define("editor-base", scm_from_utf8_string(BASE.c_str()));
+    scm_c_define_gsubr("find-file", 1, 0, 0, (scm_t_subr) &api_find_file);
+    scm_c_primitive_load((BASE + "scripts/init.scm").c_str());
+  
+    app->run(*window, argc, argv);
+  }
+}
+
+int main(int argc, char* argv[]) {
+  scm_boot_guile(argc, argv, scm_main, 0);
+  return 0;
 }

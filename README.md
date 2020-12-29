@@ -1,5 +1,11 @@
 # Bow - My perfect text editor goals 
 
+## Init submodules
+
+```sh
+git submodule update --init --recursive
+```
+
 ## Native performance.
 
 ### System UI and perfect OS integration.
