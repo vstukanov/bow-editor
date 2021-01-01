@@ -21,6 +21,7 @@
 #include <gtkmm/textview.h>
 
 const std::string BASE = "/home/vst/Dev/snaex/bow-editor/";
+SCM scm_init_module;
 
 // implemented by `tree-sitter-javascript` library.
 extern "C" TSLanguage *tree_sitter_javascript();
@@ -140,6 +141,9 @@ void MyWindow::open(const std::string &filename) {
   TSNode root_node = ts_tree_root_node(tree);
   TSTreeCursor cursor = ts_tree_cursor_new(root_node);
 
+  SCM parceProc = scm_variable_ref(scm_c_lookup("parse-tree"));
+  SCM result = scm_call_1(parceProc, scm_from_pointer(&cursor, NULL));
+
   std::string queris = Glib::file_get_contents(BASE + "libs/tree-sitter-javascript/queries/highlights.scm");
   uint err_offset = 0;
   TSQueryError query_error;
@@ -197,20 +201,23 @@ extern "C" {
 
     return SCM_UNSPECIFIED;
   }
-  
-  static void scm_main(void *closure, int argc, char *argv[]) {
-    std::cout << "Hello, World!" << std::endl;
 
+  static void scm_main(void *closure, int argc, char *argv[]) {
     auto app = Gtk::Application::create("me.oddy.bow");
     window = new MyWindow();
 
     // window.open("sample/react.development.js");
     window->set_font("DejaVu Sans Mono", 10);
 
+    scm_c_load_extension("./libscm_tree_sitter.so", "scm_init_tree_sitter_module");
+
     scm_c_define("editor-base", scm_from_utf8_string(BASE.c_str()));
     scm_c_define_gsubr("find-file", 1, 0, 0, (scm_t_subr) &api_find_file);
-    scm_c_primitive_load((BASE + "scripts/init.scm").c_str());
-  
+    scm_init_module = scm_c_primitive_load((BASE + "scripts/init.scm").c_str());
+
+    SCM proc = scm_variable_ref(scm_c_lookup("main"));
+    scm_call_0(proc);
+
     app->run(*window, argc, argv);
   }
 }

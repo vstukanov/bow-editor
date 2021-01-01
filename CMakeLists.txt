@@ -8,6 +8,12 @@ find_package(PkgConfig)
 pkg_check_modules(GTKMM gtkmm-3.0)
 pkg_check_modules(GUILE guile-3.0)
 
+add_library(scm_tree_sitter SHARED modules/scm/tree-sitter.c)
+target_include_directories(scm_tree_sitter PUBLIC
+  ${GUILE_INCLUDE_DIRS}
+  libs/tree-sitter/lib/src
+  libs/tree-sitter/lib/include)
+
 link_directories(bow
   ${GTKMM_LIBRARY_DIRS}
   ${GUILE_LIBRARY_DIRS})
@@ -28,6 +34,10 @@ target_include_directories(tree_sitter PUBLIC
   libs/tree-sitter/lib/include)
 
 add_executable(bow main.cpp)
-target_link_libraries(bow ${GTKMM_LIBRARIES} ${GUILE_LIBRARIES} tree_sitter)
+target_link_libraries(bow
+  ${GTKMM_LIBRARIES}
+  ${GUILE_LIBRARIES}
+  tree_sitter
+  scm_tree_sitter)
 
 # cmake -S . -B _build -D CMAKE_EXPORT_COMPILE_COMMANDS=ON
