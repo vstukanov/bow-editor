@@ -1,4 +1,7 @@
+#include "gtkmm/textbuffer.h"
+#include "libguile/scm.h"
 #include <cstddef>
+#include <cstdint>
 #include <fstream>
 #include <giomm/application.h>
 #include <glibmm/miscutils.h>
@@ -10,6 +13,7 @@
 #include <iostream>
 #include <memory>
 #include <set>
+#include <stdint.h>
 #include <string>
 #include <libguile.h>
 
@@ -34,12 +38,13 @@ public:
 
   void open(const std::string &path);
   void set_font(const std::string &font, uint font_size);
+  std::string get_text(uint32_t row, uint32_t column);
+  Gtk::TextView m_pTextView;
 private:
   std::set<std::string> m_supported_tags;
   Glib::RefPtr<Gtk::TextTag> create_theme_tag(const std::string &name, const std::string &fg_color);
   void create_theme();
   void highlight_node(TSTreeCursor *node, int level);
-  Gtk::TextView m_pTextView;
   Gtk::ScrolledWindow m_pScrolledWindow;
 };
 
@@ -94,23 +99,6 @@ void MyWindow::create_theme() {
   rTagTable->add(create_theme_tag("constructor", "#000"));
 }
 
-void MyWindow::highlight_node(TSTreeCursor *cursor, int level) {
-  TSNode node = ts_tree_cursor_current_node(cursor);
-  std::string node_type = ts_node_type(node);
-
-  std::cout << std::string(level * 2, ' ') << "- " << node_type << std::endl;
-
-  if (ts_tree_cursor_goto_first_child(cursor)) {
-    highlight_node(cursor, level + 1);
-    
-    while(ts_tree_cursor_goto_next_sibling(cursor)) {
-      highlight_node(cursor, level + 1);
-    }
-    
-    ts_tree_cursor_goto_parent(cursor);
-  }
-}
-
 // buffer api call
 void MyWindow::open(const std::string &filename) {
   std::string fullpath = Glib::canonicalize_filename(filename, Glib::get_current_dir());
@@ -143,54 +131,15 @@ void MyWindow::open(const std::string &filename) {
 
   SCM parceProc = scm_variable_ref(scm_c_lookup("parse-tree"));
   SCM result = scm_call_1(parceProc, scm_from_pointer(&cursor, NULL));
-
-  std::string queris = Glib::file_get_contents(BASE + "libs/tree-sitter-javascript/queries/highlights.scm");
-  uint err_offset = 0;
-  TSQueryError query_error;
-  TSQuery* query = ts_query_new(tree_sitter_javascript(),
-				queris.c_str(),
-				queris.length(),
-				&err_offset,
-				&query_error);
-
-  if (query_error != TSQueryErrorNone) {
-    std::cout << "query error" << std::endl;
-    return;
-  }
-  
-  TSQueryCursor* qcursor = ts_query_cursor_new();
-  TSQueryMatch qmatch;
-  
-  ts_query_cursor_exec(qcursor, query, root_node);
-
-  while (ts_query_cursor_next_match(qcursor, &qmatch)) {
-    for (int i = 0; i < qmatch.capture_count; ++i) {
-      uint capture_length = 0;
-      const char* capture_name_c = ts_query_capture_name_for_id(query,
-								qmatch.captures[i].index,
-								&capture_length);
-      std::string capture_name(capture_name_c, capture_length);
-
-      TSNode node = qmatch.captures[i].node;
-      TSPoint node_start = ts_node_start_point(node);
-      TSPoint node_end = ts_node_end_point(node);
-
-      auto is = refBuffer->get_iter_at_line_offset(node_start.row, node_start.column);
-      auto ie = refBuffer->get_iter_at_line_offset(node_end.row, node_end.column);
-
-      if (std::find(m_supported_tags.cbegin(), m_supported_tags.cend(), capture_name) != m_supported_tags.cend()) {
-	refBuffer->apply_tag_by_name(capture_name, is, ie);
-      } else {
-	std::cout << "! ";
-      }
-
-      printf("%s -- {%d, %d} - {%d, %d} (%s)\n", capture_name.c_str(), node_start.row, node_start.column, node_end.row, node_end.column, refBuffer->get_text(is, ie, false).c_str());
-    }
-    std::cout << std::endl;
-  }
 }
 
 MyWindow *window = nullptr;
+
+Gtk::TextBuffer::iterator scm_list_to_iter(Glib::RefPtr<Gtk::TextBuffer> buffer, SCM list) {
+  uint32_t row = scm_to_uint32(scm_list_ref(list, scm_from_uint(0)));
+  uint32_t column = scm_to_uint32(scm_list_ref(list, scm_from_uint(1)));
+  return buffer->get_iter_at_line_offset(row, column);
+}
 
 extern "C" {
   static SCM api_find_file(SCM scm_path) {
@@ -200,6 +149,27 @@ extern "C" {
     window->open(std::string(cpath, path_length));
 
     return SCM_UNSPECIFIED;
+  }
+
+  static SCM api_get_text(SCM start, SCM end) {
+    auto buffer = window->m_pTextView.get_buffer();
+    
+    auto text = buffer->get_text(scm_list_to_iter(buffer, start),
+				 scm_list_to_iter(buffer, end));
+
+    return scm_from_utf8_string(text.c_str());
+  }
+
+  static SCM api_apply_tag(SCM tag, SCM start, SCM end) {
+    auto buffer = window->m_pTextView.get_buffer();
+    std::string tagname(scm_to_utf8_string(tag));
+
+    // std::cout << " [" << tagname << "] " << std::endl;
+    buffer->apply_tag_by_name(tagname,
+			      scm_list_to_iter(buffer, start),
+			      scm_list_to_iter(buffer, end));
+
+    return SCM_UNDEFINED;
   }
 
   static void scm_main(void *closure, int argc, char *argv[]) {
@@ -213,6 +183,9 @@ extern "C" {
 
     scm_c_define("editor-base", scm_from_utf8_string(BASE.c_str()));
     scm_c_define_gsubr("find-file", 1, 0, 0, (scm_t_subr) &api_find_file);
+    scm_c_define_gsubr("buffer-get-text", 2, 0, 0, (scm_t_subr) &api_get_text);
+    scm_c_define_gsubr("buffer-apply-tag", 3, 0, 0, (scm_t_subr) &api_apply_tag);
+    
     scm_init_module = scm_c_primitive_load((BASE + "scripts/init.scm").c_str());
 
     SCM proc = scm_variable_ref(scm_c_lookup("main"));

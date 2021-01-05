@@ -4,6 +4,9 @@
 #include "libguile/list.h"
 #include "libguile/modules.h"
 #include "libguile/numbers.h"
+#include "libguile/pairs.h"
+#include "libguile/strings.h"
+#include "libguile/symbols.h"
 #include <tree_sitter/api.h>
 #include <libguile.h>
 
@@ -38,33 +41,23 @@ api_tree_cursor_node_type(SCM _cursor)
 }
 
 SCM
-api_tree_cursor_node(SCM _cursor)
+api_tree_cursor_current_node_to_alist(SCM _cursor)
 {
   TSTreeCursor *cursor = (TSTreeCursor *) scm_to_pointer(_cursor);
   TSNode current_node = ts_tree_cursor_current_node(cursor);
 
-  SCM alist = scm_make_list(scm_from_uint32(0), scm_from_uint32(0));
-
   TSPoint start_point = ts_node_start_point(current_node);
   TSPoint end_point = ts_node_end_point(current_node);
 
-  scm_acons(scm_from_utf8_symbol("start-row"),
-	    scm_from_uint32(start_point.row),
-	    alist);
+  SCM start_list = scm_list_2(scm_from_uint32(start_point.row),
+			      scm_from_uint32(start_point.column));
 
-  scm_acons(scm_from_utf8_symbol("start-column"),
-	    scm_from_uint32(start_point.column),
-	    alist);
+  SCM end_list = scm_list_2(scm_from_uint32(end_point.row),
+			    scm_from_uint32(end_point.column));
 
-  scm_acons(scm_from_utf8_symbol("end-row"),
-	    scm_from_uint32(end_point.row),
-	    alist);
+  SCM node_type = scm_from_utf8_string(ts_node_type(current_node));
 
-  scm_acons(scm_from_utf8_symbol("end-column"),
-	    scm_from_uint32(end_point.column),
-	    alist);
-
-  return alist;
+  return scm_list_3(node_type, start_list, end_list);
 }
 
 void
@@ -74,11 +67,13 @@ init_tree_sitter_cursor (void *unused)
   scm_c_define_gsubr("goto-next-sibling", 1, 0, 0, &api_tree_cursor_goto_next_sibling);
   scm_c_define_gsubr("goto-parent", 1, 0, 0, &api_tree_cursor_goto_parent);
   scm_c_define_gsubr("current-node-type", 1, 0, 0, &api_tree_cursor_node_type);
+  scm_c_define_gsubr("current-node->alist", 1, 0, 0, &api_tree_cursor_current_node_to_alist);
 
   scm_c_export("goto-first-child",
 	       "goto-next-sibling",
 	       "goto-parent",
 	       "current-node-type",
+	       "current-node->alist",
 	       NULL);
 }
 
